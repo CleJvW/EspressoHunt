@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>EspressoHunt</title>
+<meta name="description" content="Bewerte deinen Kaffee-Besuch und entdecke deine Favoriten." />
+
+<!-- PWA / iOS Vollbild -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#f3e9db" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#2a1e17" media="(prefers-color-scheme: dark)" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="EspressoHunt" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app" aria-live="polite"></div>
+
+<!-- Install-Hinweis (nur im Browser, nicht im installierten Modus) -->
+<div id="installHint" class="install-hint" hidden>
+  <div class="install-hint__inner">
+    <strong>Als App installieren</strong>
+    <p id="installHintText">Teilen-Symbol tippen und „Zum Home-Bildschirm“ wählen – dann läuft die App im Vollbild.</p>
+    <button type="button" id="installHintClose" class="btn btn--ghost btn--small">Verstanden</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
