@@ -551,10 +551,18 @@ function setupInstallHint() {
     text.textContent = 'Über das Browser-Menü „Zum Startbildschirm hinzufügen“ wählen – dann läuft die App im Vollbild.';
   }
   hint.hidden = false;
-  closeBtn.addEventListener('click', () => {
+
+  const close = () => {
     hint.hidden = true;
-    localStorage.setItem('espressohunt.installHint.dismissed', '1');
+    try { localStorage.setItem('espressohunt.installHint.dismissed', '1'); } catch (e) {}
+  };
+  closeBtn.addEventListener('click', close);
+  // Tippen irgendwo auf den Hinweis schließt ihn ebenfalls
+  hint.querySelector('.install-hint__inner').addEventListener('click', (e) => {
+    if (e.target !== closeBtn) close();
   });
+  // Nach kurzer Zeit von selbst ausblenden (nur diese Sitzung)
+  setTimeout(() => { hint.hidden = true; }, 12000);
 }
 
 /* ---------------- Service Worker ---------------- */

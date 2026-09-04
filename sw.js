@@ -1,7 +1,7 @@
 /* Service Worker — macht "EspressoHunt" offline-fähig.
    Bei jeder Änderung an den Dateien die CACHE-Version hochzählen. */
 
-const CACHE = 'espressohunt-v1';
+const CACHE = 'espressohunt-v2';
 
 const ASSETS = [
   './',
