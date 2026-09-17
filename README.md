@@ -1,29 +1,58 @@
 # ☕ EspressoHunt
 
 Eine kleine, schnelle Web-App, um Café-Besuche zu bewerten – Sterne, fünf
-Geschmacks-Regler, Preis und Notizen. Läuft komplett im Browser, kann auf dem
-iPhone als **Vollbild-App** zum Home-Bildschirm hinzugefügt werden – und alle,
-die die App installiert haben, **sehen sich gegenseitig live** in einer
-geteilten Bewertungsliste.
+Geschmacks-Regler, Preis, Standort und Notizen. Läuft komplett im Browser,
+kann auf dem iPhone als **Vollbild-App** zum Home-Bildschirm hinzugefügt
+werden – und alle, die die App installiert haben, **sehen sich gegenseitig
+live** in einer geteilten Bewertungsliste.
 
-Technik: reines HTML, CSS und JavaScript. Keine Frameworks, keine Build-Tools.
-Zusätzlich ein Service Worker, damit die App auch offline funktioniert.
+**Live:** <https://clejvw.github.io/EspressoHunt/>
 
-Die Bewertungen liegen in einer geteilten Cloud-Datenbank (Firebase/Firestore,
-Projekt `espressohunt-554c7`) – alle Geräte sehen sich gegenseitig in
-Echtzeit, ganz ohne Neuladen. Jedes Gerät meldet sich dafür automatisch und
-unsichtbar anonym an (kein Login, kein Passwort) – nur der Ersteller einer
-Bewertung darf sie bearbeiten oder löschen, das erzwingen die Regeln in
-`firestore.rules` serverseitig, nicht nur die Oberfläche. Beim ersten Start
-nach dem Update auf ein Gerät, das vorher schon rein lokale Bewertungen
-hatte, werden diese automatisch einmalig in die Cloud übernommen – nichts
-geht verloren.
+## Was die App kann
 
-Config-Dateien dafür: `db.js` (Datenschicht), `firebase-config.js`
-(Projekt-Zugangsdaten – nicht geheim, der Schutz läuft über die Regeln),
-`firestore.rules` + `firebase.json` + `.firebaserc` (Regel-Deployment via
-`firebase deploy --only firestore:rules`, falls die Regeln sich mal ändern
-sollen; Login vorher mit `firebase login`).
+- **Bewerten**: Café, Preis, 1–5 Sterne, fünf Eigenschaften (cremig, fruchtig,
+  schokoladig, Geschmack, Ambiente) und freie Notizen
+- **Geteilt in Echtzeit**: neue Bewertungen erscheinen sofort auf allen Geräten
+- **Standort** je Bewertung: aktuelle Position, auf der Karte antippen oder
+  Adresse eingeben – jederzeit nachträglich änderbar
+- **Karte oder Liste**; Liste sortierbar nach Datum, Bewertung, Preis oder
+  Entfernung. Eigene Position als blauer Punkt, der der Bewegung folgt
+- **Vollbildkarte**: Minikarte in einer Bewertung antippen zeigt alle
+  Bewertungen; „In Karten öffnen" führt in die Karten-App des Geräts
+- **Freunde**: wer wie viel bewertet hat, Schnitt aus Sternen und Preis
+- **Drei Sprachen**: Deutsch, Italienisch, Englisch (Zahnrad oben rechts)
+- **Benachrichtigungen**, wenn Freunde etwas Neues bewerten
+- **Offline nutzbar**; Änderungen werden nachsynchronisiert
+
+## Technik
+
+Reines HTML, CSS und JavaScript – keine Frameworks, kein Build-Schritt.
+Einzige Ausnahme ist Leaflet für die Karten, das nur bei Bedarf vom CDN
+nachgeladen wird; ohne Karte läuft die App auch ohne diese Datei.
+
+**Daten** liegen in Firestore (Projekt `espressohunt-554c7`). Jedes Gerät
+meldet sich automatisch und unsichtbar anonym an – kein Login, kein Passwort.
+Nur wer eine Bewertung erstellt hat, darf sie ändern oder löschen; das
+erzwingt `firestore.rules` serverseitig, nicht bloß die Oberfläche. Beim
+ersten Start auf einem Gerät mit alten, rein lokalen Bewertungen werden diese
+einmalig automatisch übernommen.
+
+**Benachrichtigungen** verschickt ein Cloudflare Worker (`worker/`), der alle
+zwei Minuten nach neuen Bewertungen schaut. Die Push-Abos liegen in
+Cloudflare KV, nicht in Firestore – so verlässt kein Geheimnis den Server.
+Der private VAPID-Schlüssel ist ausschließlich ein Cloudflare-Secret.
+
+> Wichtig für iOS: Web Push muss `aes128gcm` (RFC 8291) mit dem
+> `vapid`-Schema (RFC 8292) verwenden. Das ältere `aesgcm`-Format lehnt Safari
+> ab. `worker/crypto-verify.mjs` prüft das ohne Netzzugriff nach, indem es die
+> selbst erzeugte Nachricht wieder entschlüsselt:
+>
+> ```
+> cd worker && VAPID_PRIVATE_KEY=<schluessel> node crypto-verify.mjs
+> ```
+
+Alle Dienste laufen im kostenlosen Kontingent; es ist keine Zahlungsmethode
+hinterlegt.
 
 ---
 
@@ -32,16 +61,20 @@ sollen; Login vorher mit `firebase login`).
 ```
 index.html                   → die App-Seite
 styles.css                   → Design
-app.js                       → Logik (Navigation, Formulare, Ansichten …)
+app.js                       → Logik (Navigation, Formulare, Ansichten, Karten)
 db.js                        → Cloud-Datenschicht (Firestore, Echtzeit-Sync)
+i18n.js                      → Texte in Deutsch, Italienisch und Englisch
+geo.js                       → Standort, Adresssuche, Entfernung, Kartenladen
+push.js                      → Benachrichtigungen an-/abmelden
 firebase-config.js           → Firebase-Projektkonfiguration (nicht geheim)
 firestore.rules              → Server-Sicherheitsregeln
-firebase.json / .firebaserc  → Firebase-CLI-Projektzuordnung (für Regel-Deployment)
-sw.js                        → Service Worker (Offline-Betrieb)
+firebase.json / .firebaserc  → Firebase-CLI-Projektzuordnung
+sw.js                        → Service Worker (Offline + Benachrichtigungen)
 manifest.webmanifest         → App-Name & Icons für "zum Home-Bildschirm"
 .nojekyll                    → sagt GitHub Pages: Dateien 1:1 ausliefern
-icons/                       → App-Icons (192, 512, Apple-Touch-Icon, Favicon)
-tools/make_icons.py          → erzeugt die Icons neu (optional, nur für Entwicklung)
+icons/                       → App-Icons
+tools/make_icons.py          → erzeugt die Icons neu (nur für Entwicklung)
+worker/                      → Cloudflare Worker für die Benachrichtigungen
 ```
 
 `tools/` und `.nojekyll` sind optional bzw. nur für Entwickler – schaden aber
@@ -84,9 +117,9 @@ Diese URL ist die App. 🎉
 ### 4. (Bei jeder späteren Änderung)
 Datei im Repository öffnen → Stift-Symbol → ändern → **Commit changes**.
 Nach ~1 Minute ist die neue Version online.
-Wenn sich `app.js`, `styles.css` oder `index.html` geändert haben, in `sw.js`
-die Zeile `const CACHE = 'espressohunt-v1';` auf `-v2`, `-v3` … hochzählen –
-dann lädt das iPhone die neue Version sicher nach.
+Wenn sich App-Dateien geändert haben, in `sw.js` die Zeile
+`const CACHE = 'espressohunt-vN';` um eins hochzählen – dann lädt das iPhone
+die neue Version sicher nach.
 
 ---
 
@@ -102,9 +135,17 @@ dann lädt das iPhone die neue Version sicher nach.
 Beim ersten Öffnen im Browser blendet die App unten einen kurzen Hinweis dazu
 ein; nach dem Hinzufügen verschwindet er.
 
-Die Bewertungen bleiben erhalten – auch nach App schließen, Neustart der App
-und Neustart des iPhones. (Sie liegen im Speicher der Home-Bildschirm-App.
-Deshalb: erst zum Home-Bildschirm hinzufügen, dann Bewertungen eingeben.)
+Die Bewertungen liegen in der geteilten Cloud-Datenbank und sind auf jedem
+Gerät verfügbar – nach App schließen, Neustart und auch auf einem neuen
+Handy. Nur der Name, die Sprache und die Ansichtseinstellungen werden je
+Gerät gemerkt.
+
+### Benachrichtigungen einschalten
+
+Zahnrad oben rechts → **Benachrichtigungen** → Schalter antippen und die
+Nachfrage von iOS bestätigen. Auf dem iPhone geht das **erst, wenn die App
+zum Home-Bildschirm hinzugefügt wurde** – im normalen Safari-Tab bietet iOS
+keine Web-Benachrichtigungen an.
 
 ---
 
