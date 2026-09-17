@@ -1,0 +1,9 @@
+{
+  "name": "espressohunt-push",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "webpush-webcrypto": "^1.0.5"
+  }
+}

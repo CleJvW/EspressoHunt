@@ -1,7 +1,7 @@
-/* Service Worker — macht "EspressoHunt" offline-fähig.
+/* Service Worker — Offline-Betrieb und Push-Benachrichtigungen.
    Bei jeder Änderung an den Dateien die CACHE-Version hochzählen. */
 
-const CACHE = 'espressohunt-v3';
+const CACHE = 'espressohunt-v4';
 
 const ASSETS = [
   './',
@@ -9,6 +9,9 @@ const ASSETS = [
   './styles.css',
   './app.js',
   './db.js',
+  './i18n.js',
+  './geo.js',
+  './push.js',
   './firebase-config.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
@@ -18,7 +21,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.allSettled(ASSETS.map((a) => c.add(a))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -33,20 +40,15 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  // Fremde Server (Firebase/Firestore, Google-CDN …) unberührt ans Netzwerk
-  // durchreichen – nicht cachen, nicht dazwischenschalten (wichtig für die
-  // dauerhaften Echtzeit-Verbindungen von Firestore).
+  // Fremde Server (Firebase, Kartenkacheln, Push-Dienst …) unberührt ans
+  // Netzwerk durchreichen – wichtig für Firestores Echtzeit-Verbindungen.
   if (new URL(req.url).origin !== self.location.origin) return;
 
-  // Navigationsanfragen: erst Netzwerk, dann Cache (App-Shell)
   if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
-    );
+    event.respondWith(fetch(req).catch(() => caches.match('./index.html')));
     return;
   }
 
-  // Übrige Assets: Cache-first, im Hintergrund aktualisieren
   event.respondWith(
     caches.match(req).then((cached) => {
       const network = fetch(req).then((res) => {
@@ -57,6 +59,41 @@ self.addEventListener('fetch', (event) => {
         return res;
       }).catch(() => cached);
       return cached || network;
+    })
+  );
+});
+
+/* ---------------- Push ---------------- */
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+
+  const title = data.title || 'EspressoHunt';
+  const options = {
+    body: data.body || '',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    tag: data.ratingId || 'espressohunt',
+    renotify: true,
+    data: { url: data.url || './' },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.includes('/EspressoHunt') && 'focus' in client) {
+          client.navigate(target).catch(() => {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
     })
   );
 });

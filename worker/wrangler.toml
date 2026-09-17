@@ -1,0 +1,16 @@
+name = "espressohunt-push"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Alle 2 Minuten nach neuen Bewertungen schauen
+[triggers]
+crons = ["*/2 * * * *"]
+
+# Öffentlicher VAPID-Schlüssel (kein Geheimnis – steht auch in der App).
+# Der private Schlüssel liegt als Secret: wrangler secret put VAPID_PRIVATE_KEY
+[vars]
+VAPID_PUBLIC_KEY = "BD2JHCx-JeKqjo4daOk_v88gxhQHhzxhjGgDGY374hMmyBlZArKym57uRrtgdE_xbvN5cPCj57Z9e8XG_1o53Wk"
+
+[[kv_namespaces]]
+binding = "SUBS"
+id = "92adbebb19194f718ec531cd4a4abc0a"
