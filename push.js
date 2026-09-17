@@ -9,8 +9,8 @@
 import { t, getLang } from './i18n.js';
 import { getUid } from './db.js';
 
-export const PUSH_SERVER = 'https://espressohunt-push.espressohunt.workers.dev';
-const VAPID_PUBLIC_KEY = 'BD2JHCx-JeKqjo4daOk_v88gxhQHhzxhjGgDGY374hMmyBlZArKym57uRrtgdE_xbvN5cPCj57Z9e8XG_1o53Wk';
+export const PUSH_SERVER = 'https://espressohunt-push.janwiese1707.workers.dev';
+const VAPID_PUBLIC_KEY = 'BHRF1fF5VCtqDg5UqYrTK-Vl3UsLIoCG0TZYpVFfruV-FWwICjyHXwyWiLWiV4bDwv4ozJNRQE0vp86_E5xyiuo';
 const AUTHOR_KEY = 'espressohunt.author';
 
 function urlBase64ToUint8Array(base64String) {

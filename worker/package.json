@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "webpush-webcrypto": "^1.0.5"
+    "@block65/webcrypto-web-push": "^2.0.0"
   }
 }

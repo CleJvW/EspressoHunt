@@ -1024,3 +1024,215 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 @keyframes snack-out {
   to { opacity: 0; transform: translate(-50%, 14px); }
 }
+
+/* ---------- Standort auf der Karte wählen ---------- */
+
+.segmented--four button { padding: 7px 6px; font-size: 13px; }
+
+.pick-wrap {
+  position: relative;
+  height: 230px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+}
+.pick-map { width: 100%; height: 100%; }
+
+/* Nadel bleibt fix in der Mitte, die Karte wird darunter verschoben */
+.pick-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 600;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  color: var(--accent);
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.4));
+}
+.pick-crosshair svg { width: 34px; height: 34px; }
+.pick-crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- Blauer Live-Standortpunkt ---------- */
+
+.live-dot-wrap { background: none; border: none; }
+.live-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2f7cf6;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+.live-dot::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: rgba(47, 124, 246, 0.35);
+  animation: live-pulse 2.2s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  0%   { transform: scale(0.6); opacity: 0.8; }
+  70%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::before { animation: none; opacity: 0.25; }
+}
+
+/* ---------- "Zu meinem Standort"-Knopf ---------- */
+
+.map-locate {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 600;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.14s ease;
+}
+.map-locate:active { transform: scale(0.92); }
+.map-locate--sm { width: 34px; height: 34px; right: 8px; top: 8px; border-radius: 10px; }
+.map-locate--sm svg { width: 17px; height: 17px; }
+.map-locate.is-busy { opacity: 0.55; }
+.map-locate.is-busy svg { animation: spin 1s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Antippbare Minikarte in der Detailansicht ---------- */
+
+.detail-map-btn {
+  display: block;
+  width: calc(100% + 32px);
+  margin: 0 -16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  position: relative;
+  cursor: pointer;
+  color: inherit;
+}
+.detail-map-btn .detail-map { margin: 10px 0 0; pointer-events: none; }
+.detail-map__hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  box-shadow: var(--shadow-soft);
+}
+.detail-map-btn:active .detail-map__hint { transform: scale(0.95); }
+
+/* ---------- Vollbild-Karte ---------- */
+
+body.no-scroll { overflow: hidden; }
+
+.map-full {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  animation: map-full-in 0.24s ease both;
+}
+
+@keyframes map-full-in {
+  from { opacity: 0; transform: scale(1.02); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.map-full__bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(var(--safe-top) + 12px) 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.map-full__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-full__close {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 600;
+  padding: 6px 0 6px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.map-full__body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.map-full__body .map { width: 100%; height: 100%; }
+.map-full__body .map-locate { top: auto; bottom: calc(22px + var(--safe-bottom)); right: 14px; }
+
+/* hervorgehobene Bewertung auf der Vollbild-Karte */
+.coffee-pin--focus {
+  width: 42px;
+  height: 42px;
+  background: var(--star);
+  border-width: 3px;
+  animation: pin-drop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.coffee-pin--focus span { font-size: 17px; color: #3a2410; }
+
+@keyframes pin-drop {
+  0%   { transform: rotate(-45deg) translateY(-16px) scale(0.7); opacity: 0; }
+  100% { transform: rotate(-45deg) translateY(0) scale(1); opacity: 1; }
+}
+
+.popup-who { color: #8a7a6b; font-size: 12.5px; }
+.popup-link {
+  margin-top: 6px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 2px 0;
+  cursor: pointer;
+}

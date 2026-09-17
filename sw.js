@@ -1,7 +1,7 @@
 /* Service Worker — Offline-Betrieb und Push-Benachrichtigungen.
    Bei jeder Änderung an den Dateien die CACHE-Version hochzählen. */
 
-const CACHE = 'espressohunt-v4';
+const CACHE = 'espressohunt-v6';
 
 const ASSETS = [
   './',

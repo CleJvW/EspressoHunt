@@ -12,7 +12,8 @@ import {
 } from './db.js';
 import { t, tn, getLang, setLang, getLocale, LANGUAGES } from './i18n.js';
 import {
-  getCurrentPosition, getCachedPosition, geocodeAddress, reverseGeocode,
+  getCurrentPosition, getCachedPosition, watchPosition, clearWatch,
+  geocodeAddress, reverseGeocode,
   distanceMeters, formatDistance, loadLeaflet, mapsLink,
 } from './geo.js';
 
@@ -124,6 +125,8 @@ const backIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="curren
 const gearIcon = `<svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path fill="currentColor" d="M12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7zm7.4-2.6l1.8 1.4-1.9 3.3-2.2-.7a7.6 7.6 0 01-1.6.9l-.4 2.2h-3.8l-.4-2.2a7.6 7.6 0 01-1.6-.9l-2.2.7-1.9-3.3 1.8-1.4a7.7 7.7 0 010-1.8L2.8 9.7l1.9-3.3 2.2.7c.5-.36 1-.66 1.6-.9l.4-2.2h3.8l.4 2.2c.56.24 1.1.54 1.6.9l2.2-.7 1.9 3.3-1.8 1.4c.05.6.05 1.2 0 1.8z"/></svg>`;
 const pinIcon = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 00-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 00-7-7zm0 9.5A2.5 2.5 0 1112 6.5a2.5 2.5 0 010 5z"/></svg>`;
 const peopleIcon = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M16 11a3 3 0 100-6 3 3 0 000 6zm-8 0a3 3 0 100-6 3 3 0 000 6zm0 2c-2.7 0-8 1.34-8 4v3h10v-3c0-.98.4-1.83 1.05-2.5A13 13 0 008 13zm8 0c-.35 0-.74.02-1.15.06A4.6 4.6 0 0116 17v3h8v-3c0-2.66-5.3-4-8-4z"/></svg>`;
+const expandIcon = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>`;
+const locateIcon = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3A9.01 9.01 0 0013 3.06V1h-2v2.06A9.01 9.01 0 003.06 11H1v2h2.06A9.01 9.01 0 0011 20.94V23h2v-2.06A9.01 9.01 0 0020.94 13H23v-2h-2.06zM12 19a7 7 0 110-14 7 7 0 010 14z"/></svg>`;
 
 /* ---------------- Router ---------------- */
 
@@ -145,9 +148,179 @@ function navigate(hash, replace) {
   else location.hash = hash;
 }
 
+/* Blauer Punkt: eine Standortverfolgung, die sich an alle offenen
+   Karten hängt und beim Verlassen der Ansicht wieder aufgeräumt wird. */
+let geoWatchId = null;
+let geoListeners = [];
+
+/* Meldet einen Zuhörer an und gibt eine Funktion zum Abmelden zurück.
+   Die eigentliche Ortung läuft nur, solange mindestens einer zuhört. */
+function startLocationWatch(listener) {
+  geoListeners.push(listener);
+  const cached = getCachedPosition();
+  if (cached) listener({ ...cached });
+
+  if (geoWatchId == null) {
+    geoWatchId = watchPosition(
+      (pos) => {
+        myPosition = { lat: pos.lat, lng: pos.lng };
+        geoListeners.forEach((fn) => { try { fn(pos); } catch (e) {} });
+      },
+      () => {}
+    );
+  }
+
+  return () => {
+    geoListeners = geoListeners.filter((fn) => fn !== listener);
+    if (geoListeners.length === 0) stopLocationWatch();
+  };
+}
+
+function stopLocationWatch() {
+  geoListeners = [];
+  if (geoWatchId != null) { clearWatch(geoWatchId); geoWatchId = null; }
+}
+
+/* Blauen Standortpunkt (mit Genauigkeitskreis) auf einer Karte führen */
+function attachLiveDot(L, map) {
+  let dot = null;
+  let halo = null;
+  return startLocationWatch((pos) => {
+    if (!map || !map.getContainer || !map.getContainer().isConnected) return;
+    const at = [pos.lat, pos.lng];
+    if (!dot) {
+      halo = L.circle(at, {
+        radius: pos.accuracy || 30, color: '#2f7cf6', weight: 1,
+        fillColor: '#2f7cf6', fillOpacity: 0.12,
+      }).addTo(map);
+      dot = L.marker(at, {
+        icon: L.divIcon({ className: 'live-dot-wrap', html: '<div class="live-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+        zIndexOffset: 1000,
+        interactive: false,
+      }).addTo(map);
+    } else {
+      dot.setLatLng(at);
+      halo.setLatLng(at).setRadius(pos.accuracy || 30);
+    }
+  });
+}
+
+/* ---------------- Vollbild-Karte mit allen Bewertungen ---------------- */
+
+async function openFullscreenMap(focusRating) {
+  const overlay = document.createElement('div');
+  overlay.className = 'map-full';
+  overlay.innerHTML = `
+    <div class="map-full__bar">
+      <strong class="map-full__title">${escapeHtml(focusRating ? focusRating.cafe : t('view_map'))}</strong>
+      <button type="button" class="map-full__close" id="mapFullClose">${escapeHtml(t('map_close'))}</button>
+    </div>
+    <div class="map-full__body" id="mapFullBody">
+      <div class="map-loading">${escapeHtml(t('map_loading'))}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.body.classList.add('no-scroll');
+
+  let detachDot = null;
+  const close = () => {
+    if (detachDot) detachDot();
+    overlay.remove();
+    document.body.classList.remove('no-scroll');
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('hashchange', close);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('hashchange', close);
+  overlay.querySelector('#mapFullClose').addEventListener('click', close);
+
+  let L;
+  try {
+    L = await loadLeaflet();
+  } catch (e) {
+    overlay.querySelector('#mapFullBody').innerHTML =
+      `<div class="empty"><div class="empty__icon">🗺️</div><p>${escapeHtml(t('map_failed'))}</p></div>`;
+    return;
+  }
+  if (!overlay.isConnected) return;
+
+  const body = overlay.querySelector('#mapFullBody');
+  body.innerHTML = '<div class="map" id="mapFullEl"></div>';
+  const map = L.map(body.querySelector('#mapFullEl'), { zoomControl: false });
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap',
+  }).addTo(map);
+
+  // Alle Bewertungen mit Standort, die angetippte hervorgehoben
+  const withLoc = ratingsCache.filter(hasLocation);
+  const bounds = [];
+  let focusMarker = null;
+
+  withLoc.forEach((r) => {
+    const isFocus = focusRating && r.id === focusRating.id;
+    const marker = L.marker([r.lat, r.lng], {
+      icon: L.divIcon({
+        className: 'coffee-pin-wrap',
+        html: `<div class="coffee-pin${isFocus ? ' coffee-pin--focus' : ''}"><span>${r.stars || '☕'}</span></div>`,
+        iconSize: isFocus ? [42, 42] : [34, 34],
+        iconAnchor: isFocus ? [21, 42] : [17, 34],
+        popupAnchor: [0, isFocus ? -40 : -32],
+      }),
+      zIndexOffset: isFocus ? 500 : 0,
+    }).addTo(map);
+
+    const price = formatPrice(r.price) ? ` · ${escapeHtml(formatPrice(r.price))}` : '';
+    const who = r.ownerUid === getUid() ? t('by_you') : t('by_name', { name: r.author || t('someone') });
+    const popup = document.createElement('div');
+    popup.innerHTML =
+      `<strong>${escapeHtml(r.cafe)}</strong><br>${'★'.repeat(r.stars || 0)}${price}<br>` +
+      `<span class="popup-who">${escapeHtml(who)}</span><br>` +
+      `<button type="button" class="popup-link">${escapeHtml(t('open_rating'))} →</button>`;
+    popup.querySelector('.popup-link').addEventListener('click', () => {
+      close();
+      navigate('/r/' + r.id);
+    });
+    marker.bindPopup(popup);
+
+    bounds.push([r.lat, r.lng]);
+    if (isFocus) focusMarker = marker;
+  });
+
+  if (focusRating && hasLocation(focusRating)) {
+    map.setView([focusRating.lat, focusRating.lng], 16);
+    if (focusMarker) setTimeout(() => focusMarker.openPopup(), 350);
+  } else if (bounds.length > 1) {
+    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+  } else if (bounds.length === 1) {
+    map.setView(bounds[0], 15);
+  } else {
+    map.setView([51.05, 13.74], 11);
+  }
+
+  detachDot = attachLiveDot(L, map);
+
+  const locateBtn = document.createElement('button');
+  locateBtn.type = 'button';
+  locateBtn.className = 'map-locate';
+  locateBtn.setAttribute('aria-label', t('map_locate'));
+  locateBtn.innerHTML = locateIcon;
+  locateBtn.addEventListener('click', async () => {
+    try {
+      const pos = myPosition || (await getCurrentPosition());
+      myPosition = pos;
+      map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 15), { animate: true });
+    } catch (e) { toast(t('loc_denied')); }
+  });
+  body.appendChild(locateBtn);
+
+  setTimeout(() => map.invalidateSize(), 80);
+}
+
 function render() {
   const route = parseHash();
   closeOverlays();
+  stopLocationWatch();
 
   let view;
   if (!ratingsReady) view = LoadingView();
@@ -402,17 +575,12 @@ async function renderMap(wrap, ratings) {
     const priceLine = formatPrice(r.price) ? ` · ${escapeHtml(formatPrice(r.price))}` : '';
     marker.bindPopup(
       `<strong>${escapeHtml(r.cafe)}</strong><br>${'★'.repeat(r.stars || 0)}${priceLine}<br>` +
-      `<a href="#/r/${encodeURIComponent(r.id)}">${escapeHtml(t('edit') === 'Edit' ? 'Open' : t('d_back'))} →</a>`
+      `<a href="#/r/${encodeURIComponent(r.id)}">${escapeHtml(t('open_rating'))} →</a>`
     );
     bounds.push([r.lat, r.lng]);
   });
 
-  if (myPosition) {
-    L.circleMarker([myPosition.lat, myPosition.lng], {
-      radius: 7, color: '#2f7cf6', fillColor: '#2f7cf6', fillOpacity: 0.9, weight: 3,
-    }).addTo(map).bindPopup(escapeHtml(t('map_my_location')));
-    bounds.push([myPosition.lat, myPosition.lng]);
-  }
+  if (myPosition) bounds.push([myPosition.lat, myPosition.lng]);
 
   if (bounds.length === 1) map.setView(bounds[0], 15);
   else if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
@@ -420,22 +588,34 @@ async function renderMap(wrap, ratings) {
 
   setTimeout(() => map.invalidateSize(), 60);
 
+  // Blauer Punkt, der der eigenen Bewegung folgt
+  attachLiveDot(L, map);
+
+  // Knopf: zur eigenen Position springen
+  const locateBtn = document.createElement('button');
+  locateBtn.type = 'button';
+  locateBtn.className = 'map-locate';
+  locateBtn.setAttribute('aria-label', t('map_locate'));
+  locateBtn.innerHTML = locateIcon;
+  locateBtn.addEventListener('click', async () => {
+    locateBtn.classList.add('is-busy');
+    try {
+      const pos = myPosition || (await getCurrentPosition());
+      myPosition = pos;
+      map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 15), { animate: true });
+    } catch (e) {
+      toast(t('loc_denied'));
+    } finally {
+      locateBtn.classList.remove('is-busy');
+    }
+  });
+  wrap.appendChild(locateBtn);
+
   if (withLoc.length === 0) {
     const note = document.createElement('div');
     note.className = 'map-note';
     note.textContent = t('map_empty');
     wrap.appendChild(note);
-  }
-
-  // Eigenen Standort im Hintergrund holen und ergänzen
-  if (!myPosition) {
-    getCurrentPosition().then((pos) => {
-      myPosition = pos;
-      if (!wrap.isConnected) return;
-      L.circleMarker([pos.lat, pos.lng], {
-        radius: 7, color: '#2f7cf6', fillColor: '#2f7cf6', fillOpacity: 0.9, weight: 3,
-      }).addTo(map).bindPopup(escapeHtml(t('map_my_location')));
-    }).catch(() => {});
   }
 }
 
@@ -656,8 +836,9 @@ function FormView(existing) {
 
       <div class="field">
         <span class="field__label">${escapeHtml(t('f_location'))}</span>
-        <div class="segmented segmented--full" id="locSeg">
+        <div class="segmented segmented--full segmented--four" id="locSeg">
           <button type="button" data-mode="current">${escapeHtml(t('loc_current'))}</button>
+          <button type="button" data-mode="map">${escapeHtml(t('loc_map'))}</button>
           <button type="button" data-mode="address">${escapeHtml(t('loc_address'))}</button>
           <button type="button" data-mode="none">${escapeHtml(t('loc_none'))}</button>
         </div>
@@ -740,6 +921,10 @@ function FormView(existing) {
         });
       return;
     }
+    if (locMode === 'map') {
+      paintMapPicker();
+      return;
+    }
     // address
     locBody.innerHTML = `
       <div class="addr-row">
@@ -779,9 +964,80 @@ function FormView(existing) {
     });
   }
 
+  /* Karte zum Antippen: Nadel bleibt in der Mitte, Karte wird verschoben */
+  async function paintMapPicker() {
+    locBody.innerHTML = `
+      <div class="pick-wrap">
+        <div class="pick-map" id="pickMap"></div>
+        <div class="pick-crosshair">${pinIcon}</div>
+        <button type="button" class="map-locate map-locate--sm" id="pickLocate"
+          aria-label="${escapeHtml(t('map_locate'))}">${locateIcon}</button>
+      </div>
+      <p class="field__hint">${escapeHtml(t('loc_map_hint'))}</p>
+      <div class="loc-status">${model.lat != null ? `${pinIcon} ${escapeHtml(model.address || '')}` : ''}</div>`;
+
+    let L;
+    try {
+      L = await loadLeaflet();
+    } catch (e) {
+      setLocStatus(escapeHtml(t('map_failed')), 'is-error');
+      return;
+    }
+    if (locMode !== 'map' || !locBody.isConnected) return;
+
+    const node = locBody.querySelector('#pickMap');
+    const start = (model.lat != null && model.lng != null)
+      ? [model.lat, model.lng]
+      : (myPosition ? [myPosition.lat, myPosition.lng] : [51.05, 13.74]);
+
+    const map = L.map(node, { zoomControl: false, attributionControl: false })
+      .setView(start, model.lat != null || myPosition ? 16 : 11);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
+    attachLiveDot(L, map);
+    setTimeout(() => map.invalidateSize(), 60);
+
+    // Standort noch unbekannt? Dann im Hintergrund holen und hinspringen
+    if (model.lat == null && !myPosition) {
+      getCurrentPosition().then((pos) => {
+        if (locMode !== 'map' || !locBody.isConnected) return;
+        myPosition = pos;
+        map.setView([pos.lat, pos.lng], 16);
+      }).catch(() => {});
+    }
+
+    locBody.querySelector('#pickLocate').addEventListener('click', async () => {
+      try {
+        const pos = myPosition || (await getCurrentPosition());
+        myPosition = pos;
+        map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 16), { animate: true });
+      } catch (e) {
+        toast(t('loc_denied'));
+      }
+    });
+
+    let addrTimer = null;
+    const applyCentre = () => {
+      const c = map.getCenter();
+      model.lat = c.lat;
+      model.lng = c.lng;
+      setLocStatus(`${pinIcon} ${escapeHtml(t('loc_picked'))} …`, 'is-ok');
+      clearTimeout(addrTimer);
+      addrTimer = setTimeout(async () => {
+        const addr = await reverseGeocode(c.lat, c.lng);
+        if (locMode !== 'map' || !locBody.isConnected) return;
+        model.address = addr;
+        setLocStatus(`${pinIcon} ${escapeHtml(addr || t('loc_picked'))}`, 'is-ok');
+      }, 900); // entlastet den kostenlosen Adressdienst (max. 1 Anfrage/Sekunde)
+    };
+    map.on('moveend', applyCentre);
+    applyCentre();
+  }
+
   locSeg.querySelectorAll('button').forEach((b) => {
     b.addEventListener('click', () => {
       locMode = b.dataset.mode;
+      stopLocationWatch();
       paintLocSeg();
       paintLocBody();
     });
@@ -960,7 +1216,11 @@ function DetailView(r) {
     ${hasLocation(r) ? `
       <div class="section-title">${escapeHtml(t('f_location'))}</div>
       <div class="card-group">
-        <div class="detail-map" id="detailMap"></div>
+        <button type="button" class="detail-map-btn" id="detailMapBtn"
+          aria-label="${escapeHtml(t('map_fullscreen'))}">
+          <div class="detail-map" id="detailMap"></div>
+          <span class="detail-map__hint">${expandIcon} ${escapeHtml(t('map_tap_hint'))}</span>
+        </button>
         <a class="row-btn" id="mapsLink" href="${mapsLink(r.lat, r.lng, r.cafe)}" target="_blank" rel="noopener">
           <span>${pinIcon} ${escapeHtml(r.address || `${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}`)}</span>
           <span class="row-btn__action">${escapeHtml(t('open_in_maps'))}</span>
@@ -1012,6 +1272,7 @@ function DetailView(r) {
   }
 
   if (hasLocation(r)) {
+    el.querySelector('#detailMapBtn').addEventListener('click', () => openFullscreenMap(r));
     loadLeaflet().then((L) => {
       const node = el.querySelector('#detailMap');
       if (!node || !node.isConnected) return;
@@ -1093,6 +1354,7 @@ function toast(message) {
 
 function closeOverlays() {
   document.querySelectorAll('.overlay, .toast, .snackbar').forEach((n) => n.remove());
+  document.body.classList.remove('no-scroll');
 }
 
 /* ---------------- Benachrichtigungen (Platzhalter bis Worker steht) -------- */

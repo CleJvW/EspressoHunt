@@ -11,7 +11,7 @@
    Der geheime VAPID-Schlüssel liegt als Worker-Secret (VAPID_PRIVATE_KEY).
    ================================================================ */
 
-import { ApplicationServerKeys, generatePushHTTPRequest } from 'webpush-webcrypto';
+import { buildPushPayload } from '@block65/webcrypto-web-push';
 
 const PROJECT = 'espressohunt-554c7';
 const FIRESTORE = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
@@ -97,18 +97,19 @@ async function listSubscriptions(env) {
 
 /* ---------------- Push verschicken ---------------- */
 
-async function sendPush(env, keys, record, payload) {
-  const { headers, body, endpoint } = await generatePushHTTPRequest({
-    applicationServerKeys: keys,
-    payload: JSON.stringify(payload),
-    target: record.subscription,
-    adminContact: 'mailto:espressohunt@example.com',
-    ttl: 60 * 60 * 12,
-    urgency: 'normal',
-  });
+async function sendPush(env, record, payload) {
+  const { headers, method, body } = await buildPushPayload(
+    { data: JSON.stringify(payload), options: { ttl: 60 * 60 * 12, urgency: 'normal' } },
+    record.subscription,
+    {
+      subject: 'mailto:espressohunt@users.noreply.github.com',
+      publicKey: env.VAPID_PUBLIC_KEY,
+      privateKey: env.VAPID_PRIVATE_KEY,
+    }
+  );
 
-  const res = await fetch(endpoint, { method: 'POST', headers, body });
-  // 404/410: Abo ist tot → aufräumen
+  const res = await fetch(record.subscription.endpoint, { method: method || 'POST', headers, body });
+  // 404/410: Abo ist tot -> aufraeumen
   if (res.status === 404 || res.status === 410) {
     await env.SUBS.delete(record.key);
     return 'gone';
@@ -119,11 +120,6 @@ async function sendPush(env, keys, record, payload) {
 /* ---------------- Cron: neue Bewertungen prüfen ---------------- */
 
 async function checkAndNotify(env) {
-  const keys = await ApplicationServerKeys.fromJSON({
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-  });
-
   const ratings = await fetchRecentRatings(10);
   if (ratings.length === 0) return { sent: 0, reason: 'no ratings' };
 
@@ -157,7 +153,7 @@ async function checkAndNotify(env) {
         ratingId: rating.id,
       };
       try {
-        const result = await sendPush(env, keys, record, payload);
+        const result = await sendPush(env, record, payload);
         if (result === 'ok') sent += 1;
       } catch (e) {
         console.log('push failed', record.key, e.message);
@@ -222,32 +218,35 @@ export default {
     // Nur zum Testen: einen Lauf manuell auslösen
     if (url.pathname === '/run' && request.method === 'POST') {
       if (url.searchParams.get('token') !== env.RUN_TOKEN) return json({ error: 'forbidden' }, 403);
-      const result = await checkAndNotify(env);
-      return json(result);
+      try {
+        return json(await checkAndNotify(env));
+      } catch (e) {
+        return json({ error: String(e && e.message), stack: String(e && e.stack).slice(0, 900) }, 500);
+      }
     }
 
     // Testbenachrichtigung an alle Abos
     if (url.pathname === '/test' && request.method === 'POST') {
       if (url.searchParams.get('token') !== env.RUN_TOKEN) return json({ error: 'forbidden' }, 403);
-      const keys = await ApplicationServerKeys.fromJSON({
-        publicKey: env.VAPID_PUBLIC_KEY,
-        privateKey: env.VAPID_PRIVATE_KEY,
-      });
-      const subs = await listSubscriptions(env);
-      const results = [];
-      for (const record of subs) {
-        const texts = TEXTS[record.lang] || TEXTS.de;
-        try {
-          results.push(await sendPush(env, keys, record, {
-            title: texts.title('EspressoHunt'),
-            body: 'Test ✓',
-            url: APP_URL,
-          }));
-        } catch (e) {
-          results.push('error ' + e.message);
+      try {
+        const subs = await listSubscriptions(env);
+        const results = [];
+        for (const record of subs) {
+          const texts = TEXTS[record.lang] || TEXTS.de;
+          try {
+            results.push(await sendPush(env, record, {
+              title: texts.title('EspressoHunt'),
+              body: 'Test ✓',
+              url: APP_URL,
+            }));
+          } catch (e) {
+            results.push('error ' + e.message);
+          }
         }
+        return json({ subs: subs.length, results });
+      } catch (e) {
+        return json({ error: String(e && e.message), stack: String(e && e.stack).slice(0, 900) }, 500);
       }
-      return json({ subs: subs.length, results });
     }
 
     return json({ error: 'not found' }, 404);

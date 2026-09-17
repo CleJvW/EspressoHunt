@@ -41,6 +41,28 @@ export function getCachedPosition() {
   return cachedPosition;
 }
 
+/* Laufende Standortverfolgung für den blauen Punkt.
+   Liefert {lat, lng, accuracy} bei jeder Änderung. */
+export function watchPosition(onUpdate, onError) {
+  if (!navigator.geolocation) {
+    onError && onError(new Error('unsupported'));
+    return null;
+  }
+  return navigator.geolocation.watchPosition(
+    (pos) => {
+      cachedPosition = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      cachedAt = Date.now();
+      onUpdate({ ...cachedPosition, accuracy: pos.coords.accuracy });
+    },
+    (err) => onError && onError(err),
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+  );
+}
+
+export function clearWatch(id) {
+  if (id != null && navigator.geolocation) navigator.geolocation.clearWatch(id);
+}
+
 /* ---------------- Adresse → Koordinaten ---------------- */
 
 export async function geocodeAddress(query) {

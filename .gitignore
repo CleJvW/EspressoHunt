@@ -6,3 +6,5 @@ __pycache__/
 # Cloudflare Worker
 worker/.runtoken
 .wrangler/
+worker/tail.log
+worker/*.log
