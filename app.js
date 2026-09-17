@@ -1,14 +1,18 @@
 /* ================================================================
-   EspressoHunt — App-Logik (Vanilla JS, keine Libraries)
-   - Lokale Speicherung via localStorage (bleibt nach Neustart erhalten)
+   EspressoHunt — App-Logik (Vanilla JS, keine Frameworks)
+   - Geteilte Bewertungen in der Cloud (Firebase Firestore, db.js),
+     Echtzeit-Sync über alle Geräte hinweg, funktioniert auch offline.
    - Hash-Routing:  #/  #/new  #/r/<id>  #/r/<id>/edit
    ================================================================ */
 
-'use strict';
+import {
+  getUid, whenReady, subscribeRatings, createRating, updateRating,
+  deleteRatingRemote, migrateLocalRatingsIfNeeded,
+} from './db.js';
 
 /* ---------------- Konstanten ---------------- */
 
-const STORAGE_KEY = 'espressohunt.ratings.v1';
+const AUTHOR_KEY = 'espressohunt.author';
 
 const METRICS = [
   { key: 'cremig',      label: 'Cremig',      emoji: '☕' },
@@ -20,45 +24,22 @@ const METRICS = [
 
 const app = document.getElementById('app');
 
-/* ---------------- Speicher ---------------- */
+/* ---------------- Zustand ---------------- */
 
-function loadRatings() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.warn('Konnte Bewertungen nicht laden:', e);
-    return [];
-  }
-}
-
-function saveRatings(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    return true;
-  } catch (e) {
-    console.error('Konnte Bewertungen nicht speichern:', e);
-    alert('Speichern nicht möglich. Ist der Browser-Speicher voll oder privat?');
-    return false;
-  }
-}
+let ratingsCache = [];
+let ratingsReady = false;
+let syncError = false;
 
 function getRating(id) {
-  return loadRatings().find((r) => r.id === id) || null;
+  return ratingsCache.find((r) => r.id === id) || null;
 }
 
-function upsertRating(rating) {
-  const list = loadRatings();
-  const idx = list.findIndex((r) => r.id === rating.id);
-  if (idx >= 0) list[idx] = rating;
-  else list.unshift(rating);
-  saveRatings(list);
+function getAuthorName() {
+  try { return localStorage.getItem(AUTHOR_KEY) || ''; } catch (e) { return ''; }
 }
 
-function deleteRating(id) {
-  saveRatings(loadRatings().filter((r) => r.id !== id));
+function setAuthorName(name) {
+  try { localStorage.setItem(AUTHOR_KEY, name); } catch (e) {}
 }
 
 /* ---------------- Helfer ---------------- */
@@ -113,6 +94,7 @@ function starsDisplay(count, large) {
 }
 
 const backIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.5 4.5L8 12l7.5 7.5 1.4-1.42L10.83 12l6.07-6.08z"/></svg>`;
+const cloudIcon = `<svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path fill="currentColor" d="M19 18H6a4 4 0 01-.5-7.97A5.5 5.5 0 0116 8.5a4.5 4.5 0 013 7.5z"/></svg>`;
 
 /* ---------------- Router ---------------- */
 
@@ -136,7 +118,8 @@ function render() {
   closeOverlays();
 
   let view;
-  if (route.name === 'home') view = HomeView();
+  if (!ratingsReady) view = LoadingView();
+  else if (route.name === 'home') view = HomeView();
   else if (route.name === 'new') view = FormView(null);
   else if (route.name === 'edit') view = FormView(getRating(route.id));
   else if (route.name === 'detail') view = DetailView(getRating(route.id));
@@ -161,10 +144,28 @@ function wireAppbarScroll() {
   window.addEventListener('scroll', onScroll, { passive: true });
 }
 
+/* ---------------- View: Ladeansicht ---------------- */
+
+function LoadingView() {
+  const el = document.createElement('div');
+  el.className = 'screen';
+  el.innerHTML = `
+    <header class="appbar"><h1 class="appbar__title">EspressoHunt</h1></header>
+    <div class="empty">
+      <div class="empty__icon">☕️</div>
+      <h2>${syncError ? 'Keine Verbindung' : 'Einen Moment …'}</h2>
+      <p>${syncError
+        ? 'Bewertungen können gerade nicht geladen werden. Prüfe deine Internetverbindung.'
+        : 'Bewertungen werden geladen.'}</p>
+    </div>
+  `;
+  return el;
+}
+
 /* ---------------- View: Startseite ---------------- */
 
 function HomeView() {
-  const ratings = loadRatings();
+  const ratings = ratingsCache;
   const el = document.createElement('div');
   el.className = 'screen';
 
@@ -175,8 +176,9 @@ function HomeView() {
     <div class="home-hero">
       <h1>Meine Bewertungen</h1>
       <p>${ratings.length
-        ? `${ratings.length} ${ratings.length === 1 ? 'Bewertung' : 'Bewertungen'} gespeichert`
-        : 'Deine Kaffee-Sammlung'}</p>
+        ? `${ratings.length} ${ratings.length === 1 ? 'Bewertung' : 'Bewertungen'} · geteilt mit deinen Freunden`
+        : 'Geteilt mit deinen Freunden'}</p>
+      <button type="button" class="author-link" id="authorLink">${cloudIcon} als „${escapeHtml(getAuthorName())}“ · Name ändern</button>
     </div>
     <div class="content content--list" id="list"></div>
     <div class="fab-bar">
@@ -191,9 +193,10 @@ function HomeView() {
       <div class="empty">
         <div class="empty__icon">☕️</div>
         <h2>Noch keinen Kaffee bewertet.</h2>
-        <p>Bewerte deinen ersten Kaffee und entdecke deine Favoriten.</p>
+        <p>Bewerte deinen ersten Kaffee und entdecke eure Favoriten.</p>
       </div>`;
   } else {
+    const myUid = getUid();
     ratings.forEach((r, i) => {
       const card = document.createElement('button');
       card.className = 'card';
@@ -207,6 +210,9 @@ function HomeView() {
           ${starsDisplay(r.stars)}
           <span class="card__date">${escapeHtml(formatDate(r.createdAt))}</span>
         </div>
+        <div class="card__meta">
+          <span class="chip chip--author">${r.ownerUid === myUid ? 'von dir' : 'von ' + escapeHtml(r.author || 'jemandem')}</span>
+        </div>
         ${r.notes ? `<p class="card__note">${escapeHtml(r.notes)}</p>` : ''}
       `;
       card.addEventListener('click', () => navigate('/r/' + r.id));
@@ -219,7 +225,41 @@ function HomeView() {
   }
 
   el.querySelector('#addBtn').addEventListener('click', () => navigate('/new'));
+  el.querySelector('#authorLink').addEventListener('click', () => {
+    promptAuthorName(() => render());
+  });
   return el;
+}
+
+/* ---------------- Name-Abfrage ---------------- */
+
+function promptAuthorName(onDone) {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="nameTitle">
+      <h3 id="nameTitle">Wie heißt du?</h3>
+      <p>Dein Name erscheint bei deinen Bewertungen, damit ihr seht, wer was bewertet hat.</p>
+      <input class="input" id="nameInput" type="text" placeholder="Dein Name"
+        autocomplete="name" enterkeyhint="done" style="margin-bottom:14px;text-align:center;" />
+      <div class="dialog__buttons">
+        <button class="btn btn--primary" id="nameSave">Los geht's</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#nameInput');
+  input.value = getAuthorName();
+  const save = () => {
+    const name = input.value.trim();
+    if (!name) { input.focus(); return; }
+    setAuthorName(name);
+    overlay.remove();
+    onDone && onDone(name);
+  };
+  overlay.querySelector('#nameSave').addEventListener('click', save);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  setTimeout(() => input.focus(), 60);
 }
 
 /* ---------------- View: Formular (neu / bearbeiten) ---------------- */
@@ -261,7 +301,7 @@ function FormView(existing) {
         <div class="price-wrap">
           <input class="input" id="price" name="price" type="text"
             inputmode="decimal" placeholder="4,50" enterkeyhint="done"
-            value="${escapeHtml(model.price === '' ? '' : String(model.price).replace('.', ','))}" />
+            value="${escapeHtml(model.price === '' || model.price == null ? '' : String(model.price).replace('.', ','))}" />
           <span class="price-wrap__cur">€</span>
         </div>
         <p class="field__hint">Preis deines Kaffees – optional.</p>
@@ -369,7 +409,8 @@ function FormView(existing) {
   });
 
   /* --- Speichern --- */
-  el.querySelector('#form').addEventListener('submit', (e) => {
+  const saveBtn = el.querySelector('#save');
+  el.querySelector('#form').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     let ok = true;
@@ -381,7 +422,7 @@ function FormView(existing) {
       ok = false;
     }
 
-    let priceValue = '';
+    let priceValue = null;
     if (priceInput.value.trim()) {
       const p = parsePrice(priceInput.value);
       if (!Number.isFinite(p) || p < 0) {
@@ -412,12 +453,23 @@ function FormView(existing) {
       geschmack: clampInt(model.geschmack, 1, 10),
       ambiente: clampInt(model.ambiente, 1, 10),
       notes: notesInput.value.trim(),
+      author: isEdit ? (existing.author || getAuthorName()) : getAuthorName(),
       createdAt: model.createdAt || now,
       updatedAt: now,
     };
 
-    upsertRating(rating);
-    showSaveToast(() => navigate(isEdit ? '/r/' + rating.id : '/', true));
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Speichere …';
+    try {
+      if (isEdit) await updateRating(rating);
+      else await createRating(rating);
+      showSaveToast(() => navigate(isEdit ? '/r/' + rating.id : '/', true));
+    } catch (err) {
+      console.error('Speichern fehlgeschlagen:', err);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Bewertung speichern';
+      alert('Speichern hat nicht geklappt. Prüfe deine Internetverbindung und versuch es noch einmal.');
+    }
   });
 
   return el;
@@ -427,6 +479,7 @@ function FormView(existing) {
 
 function DetailView(r) {
   if (!r) return null;
+  const isOwner = r.ownerUid === getUid();
 
   const el = document.createElement('div');
   el.className = 'screen';
@@ -434,7 +487,7 @@ function DetailView(r) {
     <header class="appbar">
       <button class="appbar__back" id="back">${backIcon}Bewertungen</button>
       <h1 class="appbar__title"></h1>
-      <button class="appbar__action" id="edit">Bearbeiten</button>
+      ${isOwner ? `<button class="appbar__action" id="edit">Bearbeiten</button>` : `<span style="width:78px"></span>`}
     </header>
 
     <div class="detail-hero">
@@ -443,6 +496,7 @@ function DetailView(r) {
       <div class="detail-chips">
         ${formatPrice(r.price) ? `<span class="chip">Preis <strong>${escapeHtml(formatPrice(r.price))}</strong></span>` : ''}
         <span class="chip">${escapeHtml(formatDate(r.createdAt))}</span>
+        <span class="chip">${isOwner ? 'von dir' : 'von ' + escapeHtml(r.author || 'jemandem')}</span>
       </div>
     </div>
 
@@ -455,8 +509,12 @@ function DetailView(r) {
     ` : ''}
 
     <div class="detail-actions">
-      <button class="btn btn--ghost" id="edit2">Bearbeiten</button>
-      <button class="btn btn--danger" id="del">Bewertung löschen</button>
+      ${isOwner ? `
+        <button class="btn btn--ghost" id="edit2">Bearbeiten</button>
+        <button class="btn btn--danger" id="del">Bewertung löschen</button>
+      ` : `
+        <p class="field__hint" style="text-align:center;">Nur ${escapeHtml(r.author || 'die Person, die sie erstellt hat')} kann diese Bewertung bearbeiten oder löschen.</p>
+      `}
     </div>
   `;
 
@@ -479,9 +537,11 @@ function DetailView(r) {
   });
 
   el.querySelector('#back').addEventListener('click', () => navigate('/'));
-  el.querySelector('#edit').addEventListener('click', () => navigate('/r/' + r.id + '/edit'));
-  el.querySelector('#edit2').addEventListener('click', () => navigate('/r/' + r.id + '/edit'));
-  el.querySelector('#del').addEventListener('click', () => confirmDelete(r));
+  if (isOwner) {
+    el.querySelector('#edit').addEventListener('click', () => navigate('/r/' + r.id + '/edit'));
+    el.querySelector('#edit2').addEventListener('click', () => navigate('/r/' + r.id + '/edit'));
+    el.querySelector('#del').addEventListener('click', () => confirmDelete(r));
+  }
 
   return el;
 }
@@ -505,10 +565,19 @@ function confirmDelete(r) {
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#dlgCancel').addEventListener('click', close);
-  overlay.querySelector('#dlgDelete').addEventListener('click', () => {
-    deleteRating(r.id);
-    close();
-    navigate('/', true);
+  overlay.querySelector('#dlgDelete').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#dlgDelete');
+    btn.disabled = true;
+    btn.textContent = 'Lösche …';
+    try {
+      await deleteRatingRemote(r.id);
+      close();
+      navigate('/', true);
+    } catch (err) {
+      console.error('Löschen fehlgeschlagen:', err);
+      close();
+      alert('Löschen hat nicht geklappt. Prüfe deine Internetverbindung.');
+    }
   });
 }
 
@@ -557,11 +626,9 @@ function setupInstallHint() {
     try { localStorage.setItem('espressohunt.installHint.dismissed', '1'); } catch (e) {}
   };
   closeBtn.addEventListener('click', close);
-  // Tippen irgendwo auf den Hinweis schließt ihn ebenfalls
   hint.querySelector('.install-hint__inner').addEventListener('click', (e) => {
     if (e.target !== closeBtn) close();
   });
-  // Nach kurzer Zeit von selbst ausblenden (nur diese Sitzung)
   setTimeout(() => { hint.hidden = true; }, 12000);
 }
 
@@ -575,5 +642,33 @@ if ('serviceWorker' in navigator) {
 
 /* ---------------- Start ---------------- */
 
-setupInstallHint();
-render();
+function boot() {
+  setupInstallHint();
+
+  const start = () => {
+    subscribeRatings(
+      (list) => {
+        ratingsCache = list;
+        ratingsReady = true;
+        syncError = false;
+        render();
+      },
+      () => {
+        syncError = true;
+        if (!ratingsReady) render();
+      }
+    );
+  };
+
+  render(); // Ladeansicht
+
+  if (getAuthorName()) {
+    whenReady().then(() => migrateLocalRatingsIfNeeded(getAuthorName())).finally(start);
+  } else {
+    promptAuthorName(() => {
+      whenReady().then(() => migrateLocalRatingsIfNeeded(getAuthorName())).finally(start);
+    });
+  }
+}
+
+boot();

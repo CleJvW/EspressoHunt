@@ -1,13 +1,15 @@
 /* Service Worker — macht "EspressoHunt" offline-fähig.
    Bei jeder Änderung an den Dateien die CACHE-Version hochzählen. */
 
-const CACHE = 'espressohunt-v2';
+const CACHE = 'espressohunt-v3';
 
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './db.js',
+  './firebase-config.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -30,6 +32,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
+  // Fremde Server (Firebase/Firestore, Google-CDN …) unberührt ans Netzwerk
+  // durchreichen – nicht cachen, nicht dazwischenschalten (wichtig für die
+  // dauerhaften Echtzeit-Verbindungen von Firestore).
+  if (new URL(req.url).origin !== self.location.origin) return;
 
   // Navigationsanfragen: erst Netzwerk, dann Cache (App-Shell)
   if (req.mode === 'navigate') {

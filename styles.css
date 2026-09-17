@@ -160,6 +160,22 @@ button { font-family: inherit; }
   font-size: 15px;
 }
 
+.author-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.author-link svg { color: var(--accent-2); flex-shrink: 0; }
+
 /* ---------- Inhalt ---------- */
 
 .content { padding: 16px 20px 0; }
@@ -508,6 +524,13 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   color: var(--text-soft);
 }
 .chip strong { color: var(--text); }
+.chip--author {
+  padding: 4px 11px;
+  font-size: 12.5px;
+  color: var(--accent);
+  background: transparent;
+  border-color: var(--border);
+}
 
 .section-title {
   font-size: 13px;

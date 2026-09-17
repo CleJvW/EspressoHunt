@@ -1,27 +1,47 @@
 # ☕ EspressoHunt
 
 Eine kleine, schnelle Web-App, um Café-Besuche zu bewerten – Sterne, fünf
-Geschmacks-Regler, Preis und Notizen. Läuft komplett im Browser, speichert alle
-Bewertungen **lokal auf dem Gerät** (kein Server, kein Login, keine Cloud) und
-kann auf dem iPhone als **Vollbild-App** zum Home-Bildschirm hinzugefügt werden.
+Geschmacks-Regler, Preis und Notizen. Läuft komplett im Browser, kann auf dem
+iPhone als **Vollbild-App** zum Home-Bildschirm hinzugefügt werden – und alle,
+die die App installiert haben, **sehen sich gegenseitig live** in einer
+geteilten Bewertungsliste.
 
-Technik: reines HTML, CSS und JavaScript. Keine Frameworks, keine Build-Tools,
-keine externen Libraries. Zusätzlich ein Service Worker, damit die App auch
-offline funktioniert.
+Technik: reines HTML, CSS und JavaScript. Keine Frameworks, keine Build-Tools.
+Zusätzlich ein Service Worker, damit die App auch offline funktioniert.
+
+Die Bewertungen liegen in einer geteilten Cloud-Datenbank (Firebase/Firestore,
+Projekt `espressohunt-554c7`) – alle Geräte sehen sich gegenseitig in
+Echtzeit, ganz ohne Neuladen. Jedes Gerät meldet sich dafür automatisch und
+unsichtbar anonym an (kein Login, kein Passwort) – nur der Ersteller einer
+Bewertung darf sie bearbeiten oder löschen, das erzwingen die Regeln in
+`firestore.rules` serverseitig, nicht nur die Oberfläche. Beim ersten Start
+nach dem Update auf ein Gerät, das vorher schon rein lokale Bewertungen
+hatte, werden diese automatisch einmalig in die Cloud übernommen – nichts
+geht verloren.
+
+Config-Dateien dafür: `db.js` (Datenschicht), `firebase-config.js`
+(Projekt-Zugangsdaten – nicht geheim, der Schutz läuft über die Regeln),
+`firestore.rules` + `firebase.json` + `.firebaserc` (Regel-Deployment via
+`firebase deploy --only firestore:rules`, falls die Regeln sich mal ändern
+sollen; Login vorher mit `firebase login`).
 
 ---
 
 ## 📁 Diese Dateien gehören ins Repository
 
 ```
-index.html            → die App-Seite
-styles.css            → Design
-app.js                → Logik (Speichern, Navigation, Formulare …)
-sw.js                 → Service Worker (Offline-Betrieb)
-manifest.webmanifest  → App-Name & Icons für "zum Home-Bildschirm"
-.nojekyll             → sagt GitHub Pages: Dateien 1:1 ausliefern
-icons/                → App-Icons (192, 512, Apple-Touch-Icon, Favicon)
-tools/make_icons.py   → erzeugt die Icons neu (optional, nur für Entwicklung)
+index.html                   → die App-Seite
+styles.css                   → Design
+app.js                       → Logik (Navigation, Formulare, Ansichten …)
+db.js                        → Cloud-Datenschicht (Firestore, Echtzeit-Sync)
+firebase-config.js           → Firebase-Projektkonfiguration (nicht geheim)
+firestore.rules              → Server-Sicherheitsregeln
+firebase.json / .firebaserc  → Firebase-CLI-Projektzuordnung (für Regel-Deployment)
+sw.js                        → Service Worker (Offline-Betrieb)
+manifest.webmanifest         → App-Name & Icons für "zum Home-Bildschirm"
+.nojekyll                    → sagt GitHub Pages: Dateien 1:1 ausliefern
+icons/                       → App-Icons (192, 512, Apple-Touch-Icon, Favicon)
+tools/make_icons.py          → erzeugt die Icons neu (optional, nur für Entwicklung)
 ```
 
 `tools/` und `.nojekyll` sind optional bzw. nur für Entwickler – schaden aber
@@ -43,8 +63,9 @@ nicht, wenn sie mit hochgeladen werden.
 1. Im leeren Repository auf **uploading an existing file** klicken
    (oder **Add file → Upload files**).
 2. Den **kompletten Inhalt dieses Ordners** in das Browserfenster ziehen:
-   `index.html`, `styles.css`, `app.js`, `sw.js`, `manifest.webmanifest`,
-   `.nojekyll` **und den ganzen Ordner `icons/`**.
+   `index.html`, `styles.css`, `app.js`, `db.js`, `firebase-config.js`,
+   `firestore.rules`, `firebase.json`, `.firebaserc`, `sw.js`,
+   `manifest.webmanifest`, `.nojekyll` **und den ganzen Ordner `icons/`**.
    > Wichtig: Die Dateien einzeln bzw. den Ordner `icons` mit hineinziehen –
    > **nicht** den übergeordneten Ordner `EspressoHunt` selbst, sonst liegt
    > später alles eine Ebene zu tief.
